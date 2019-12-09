@@ -3,44 +3,56 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using UnityEngine;
+using UnityEngine.Profiling;
+using UnityEngine.Serialization;
 using UnityEngine.UI;
 
-[RequireComponent(typeof(Text))]
+public enum StrType
+{
+	minutes,
+	second,
+	hourse
+}
+
 public class TestStrChange : MonoBehaviour
 {
-	public enum Type
+	
+
+	public StrType strType;
+	public bool UseSpan = false;
+
+	private void FastClearStrWithoutNew(ref string str)
 	{
-		minutes,
-		second,
-		hourse
+		var span = GetStringSpan(ref str);
+
+		for (int i = 0; i < span.Length; i++)
+		{
+			span[i] = ' ';
+		}
 	}
 
-	public Type type = Type.hourse;
-	public bool UseSpan = false;
-	
-	public static void FastChageStrByFloatValue(ref string input, int value)
+	private static Span<Char> GetStringSpan(ref string str)
+	{
+		unsafe
+		{
+			ReadOnlySpan<Char> readOnlySpan = str.AsSpan();
+			ref var refToFirstChar = ref Unsafe.AsRef<Char>(in readOnlySpan[0]);
+			var span = new Span<Char>(Unsafe.AsPointer(ref refToFirstChar), str.Length);
+			return span;
+		}
+		
+	}
+
+	private static void FastChageStrByFloatValue(ref string input, int value)
         {
             if (input == null || input.Length <= 0) return;
-            unsafe
-            {
-	            ReadOnlySpan<Char> readOnlySpan = input.AsSpan();
-	            ref var refToFirstChar = ref Unsafe.AsRef<Char>(in readOnlySpan[0]);
-	            var span = new Span<Char>(Unsafe.AsPointer(ref refToFirstChar), input.Length);
-                
-	            ItoaByStringRef(value, ref span);
-	            
-//	            span[0] = 'T';
-//	            span[1] = 'e';
-//	            span[2] = 'x';
-//	            span[3] = 't';
-//	            span[4] = ' ';
-//	            span[5] = (char)value;
-            }
+
+            var span = GetStringSpan(ref input);
+	        ItoaByStringRef(value, span);
         }
 
-	private static void ItoaByStringRef(int n, ref Span<char> str)
+	private static void ItoaByStringRef(int n, Span<char> str)
 	{
-		//char[] result = new char[11]; // 11 = "-2147483648".Length
 		int index = str.Length;
 		bool sign = n < 0;
 
@@ -55,24 +67,33 @@ public class TestStrChange : MonoBehaviour
 			n /= 10;
 		}
 		while(n != 0);
-
+		
 		if(sign)
 		{
 			str[--index] = '-';
 		}
+		
+		if (index != 0 || n == 0)
+		{
+			for (int i = 0; i < index; i++)
+			{
+				str[i] = '0';
+			}
+		}
 	}
 	
 	
-	private string currentStr = new string(new char[4]);
+	private string currentStr;
 	
-	private Text TextComponent;
+	public Text TextComponent;
+	
 	// Use this for initialization
 	void Start ()
 	{
-		Debug.Log(currentStr.Length);
-		TextComponent = GetComponent<Text>();
+		currentStr = Guid.NewGuid().ToString().Substring(0, 2);
+		FastClearStrWithoutNew(ref currentStr);
 		TextComponent.text = currentStr;
-		
+		Debug.Log(currentStr.Length);
 		StartCoroutine(ChangeText());
 	}
 
@@ -94,19 +115,19 @@ public class TestStrChange : MonoBehaviour
 		while (true)
 		{
 			time = DateTime.Now;
-			switch (type)
+			switch (strType)
 			{
-				case Type.minutes:
+				case StrType.minutes:
 				{
 					currentNumber = time.Minute;
 					break;
 				}
-				case Type.second:
+				case StrType.second:
 				{
 					currentNumber = time.Second;
 					break;
 				}
-				case Type.hourse:
+				case StrType.hourse:
 				{
 					currentNumber = time.Hour;
 					break;
@@ -117,17 +138,17 @@ public class TestStrChange : MonoBehaviour
 			
 			if (UseSpan)
 			{
-				TextComponent.text = Empty;
-				yield return null;
+				Profiler.BeginSample("Span change");
 				FastChageStrByFloatValue(ref currentStr, currentNumber);
-				TextComponent.text = currentStr;
-				
-				//TextComponent.cachedTextGenerator.Invalidate();
-				//TextComponent.SetVerticesDirty();
+				TextComponent.cachedTextGenerator.Invalidate();
+				TextComponent.SetVerticesDirty();
+				Profiler.EndSample();
 			}
 			else
 			{
+				Profiler.BeginSample("Native change");
 				TextComponent.text = currentNumber.ToString();
+				Profiler.EndSample();
 			}
 			yield return new WaitForSeconds(1f);
 		}
